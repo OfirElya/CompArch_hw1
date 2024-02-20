@@ -34,12 +34,13 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 	int i;
 	*dst = pc + 4;
 	bool prediction = false;
-
+    if(BTB->btb_blocks == NULL)
+        return false;
 	for (i = 0; i < BTB->size; i++) {
 		BTB_block* current_block = BTB->btb_blocks[i];
 		if (!current_block->valid || current_block->branch_pc != pc)
 			continue;
-		if (current_block->current_state > WNT)
+		if (current_block->current_state > 1  )
 			prediction = true;
 		if (prediction)
 			*dst = current_block->target_pc;

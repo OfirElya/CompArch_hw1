@@ -11,6 +11,8 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <malloc.h>
+
 /* A structure to return information about the currect simulator state */
 typedef struct {
 	unsigned flush_num;           // Machine flushes
@@ -18,6 +20,12 @@ typedef struct {
 	unsigned size;		      // Theoretical allocated BTB and branch predictor size
 } SIM_stats;
 
+typedef enum {
+	SNT = 0,
+	WNT,
+	WT,
+	ST
+} FSM_state;
 /* A structure to return information about the current BTB block */
 typedef struct {
 	unsigned int branch_pc;
@@ -36,20 +44,13 @@ typedef struct {
 	FSM_state initial_state;
 	bool global;
 	unsigned int tag_size;
-	size_t size;
+	int size;
 } BTB_t;
 
-typedef enum {
-	SNT = 0,
-	WNT,
-	WT,
-	ST
-} FSM_state;
 
 /*************************************************************************/
 /* The following functions should be implemented in your bp.c (or .cpp) */
 /*************************************************************************/
-
 /*
  * BP_init - initialize the predictor
  * all input parameters are set (by the main) as declared in the trace file
