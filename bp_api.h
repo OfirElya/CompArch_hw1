@@ -20,34 +20,6 @@ typedef struct {
 	unsigned size;		      // Theoretical allocated BTB and branch predictor size
 } SIM_stats;
 
-typedef enum {
-	SNT = 0,
-	WNT,
-	WT,
-	ST
-} FSM_state;
-/* A structure to return information about the current BTB block */
-typedef struct {
-	unsigned int branch_pc;
-	unsigned int target_pc;
-	FSM_state current_state;
-	char history;
-	int* tag;
-	bool valid;
-
-} BTB_block;
-
-/* A structure to return information about the BTB */
-typedef struct {
-	BTB_block** btb_blocks;
-	char** historys_p;
-	FSM_state initial_state;
-	bool global;
-	unsigned int tag_size;
-	int size;
-} BTB_t;
-
-
 /*************************************************************************/
 /* The following functions should be implemented in your bp.c (or .cpp) */
 /*************************************************************************/
@@ -81,7 +53,6 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst);
  * curStats: The returned current simulator state (only after BP_update)
  */
 void BP_GetStats(SIM_stats *curStats);
-
 
 #ifdef __cplusplus
 }

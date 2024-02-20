@@ -2,62 +2,209 @@
 /* This file should hold your implementation of the predictor simulator */
 
 #include "bp_api.h"
+#include "math.h"
+
+typedef enum {
+	SNT = 0,
+	WNT,
+	WT,
+	ST
+} FSM_state;
+
+/* A structure to return information about the current BTB block */
+typedef struct {
+	uint32_t tag;
+	uint32_t branch_pc;
+	uint32_t target_pc;
+	uint32_t* history;
+	bool valid;
+
+} BTB_block;
+
+/* A structure to return information about the BTB */
+typedef struct {
+	BTB_block* btb_blocks;
+	uint32_t tag_size;
+	uint32_t history_size;
+	uint32_t btb_size;
+	uint32_t blocks_in_btb;
+	int shared;
+	FSM_state initial_state;
+	uint32_t** fsm_array;
+	bool global_table;
+	bool global_history;
+
+} BTB_t;
 
 BTB_t* BTB;
+FSM_state update_state(FSM_state current_state, bool taken);
+uint32_t calc_tag(uint32_t pc);
+int find_block(uint32_t pc);
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
 			bool isGlobalHist, bool isGlobalTable, int Shared){
 
-	BTB = (BTB_t*)malloc(sizeof(BTB_t) * btbSize);
+	BTB = (BTB_t*)malloc(sizeof(BTB_t));
 	if (BTB == NULL)
 		return -1;
 
 	BTB->initial_state = fsmState;
-	BTB->global = isGlobalTable;
+	BTB->global_table = isGlobalTable;
+	BTB->global_history = isGlobalHist;
 	BTB->tag_size = tagSize;
-	BTB->size = btbSize;
-
-	if (isGlobalHist) {
-		BTB->historys_p = (char*)malloc(historySize);
-	}
-	else {
-		BTB->historys_p = (char*)malloc(historySize * btbSize);
-	}
-
-	if (BTB->historys_p == NULL)
-		return -1;
+	BTB->history_size = historySize;
+	BTB->btb_size = btbSize;
+	BTB->shared = Shared;
+	BTB->blocks_in_btb = 0;
 	
 	return 0;
 }
 
 bool BP_predict(uint32_t pc, uint32_t *dst){
-	int i;
+	
 	*dst = pc + 4;
+	if (!BTB->blocks_in_btb)
+		return false;
+
 	bool prediction = false;
-    if(BTB->btb_blocks == NULL)
-        return false;
-	for (i = 0; i < BTB->size; i++) {
-		BTB_block* current_block = BTB->btb_blocks[i];
-		if (!current_block->valid || current_block->branch_pc != pc)
-			continue;
-		if (current_block->current_state > 1  )
-			prediction = true;
-		if (prediction)
-			*dst = current_block->target_pc;
+
+	int block_entry = find_block(pc);
+	BTB_block* block =&(BTB->btb_blocks[block_entry]);
+
+	if (!BTB->global_table) {
+		prediction = BTB->fsm_array[block_entry][*(block->history)];
 	}
+	else {
+		switch (BTB->shared) {
+		case 0: //not shared
+			prediction = BTB->fsm_array[0][*(block->history)];
+			break;
+		case 1: //shared lsb
+			uint32_t history = *(block->history);
+			uint32_t tmp_pc = (pc << (30 - BTB->history_size)) >> (30 - BTB->history_size);
+			uint32_t location = (history ^ (tmp_pc >> 2));
+			prediction = (BTB->fsm_array[0][location]) >> 1;
+			break;
+		case 2: //shared mid
+			uint32_t history = *(block->history);
+			uint32_t tmp_pc = (pc << (32-16 - BTB->history_size)) >> (32-16 - BTB->history_size);
+			uint32_t location = (history ^ (tmp_pc >> 16));
+			prediction = (BTB->fsm_array[0][location]) >> 1;
+			break;
+		}
+	}
+
+	if (prediction)
+		*dst = block->target_pc;
 	return prediction;
 }
 
-void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
-	
-	
-	
-	
+void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
+	bool empty = false;
+	if (!BTB->blocks_in_btb)
+		empty = true;
+
+	uint32_t tag = calc_tag(pc);
+
+	// first entry in BTB
+	if (empty) {
+		BTB_block* new_block = (BTB_block*)malloc(sizeof(BTB_block));
+		new_block->tag = calc_tag(pc);
+		new_block->branch_pc = pc;
+		new_block->target_pc = targetPc;
+		new_block->valid = true;
+		if (BTB->global_history) {
+			BTB->fsm_array = (uint32_t*)malloc(sizeof(uint32_t));
+			new_block->history = BTB->fsm_array[0];
+		}
+		else {
+			BTB->fsm_array = (uint32_t*)malloc(sizeof(uint32_t)*BTB->btb_size);
+			new_block->history = BTB->fsm_array[0];
+		}
+
+		// update FSM state
+		FSM_state current_state = BTB->fsm_array[0][*(new_block->history)];
+		BTB->fsm_array[0][*(new_block->history)] = update_state(current_state, taken);
+
+		// update history
+		if (taken)
+			*(new_block->history) = (*(new_block->history) << 1) | 1;
+		else {
+			*(new_block->history) = (*(new_block->history) << 1);
+		}
+	}
+	//BTB is not empty
+	else {
+		int block_entry = find_block(pc);
+		BTB_block* existing_block = &(BTB->btb_blocks[block_entry]);
+		
+		// if block already in BTB
+		if (existing_block->tag == tag) {
+
+			// update FSM state
+			FSM_state current_state = BTB->fsm_array[block_entry][*(existing_block->history)];
+			BTB->fsm_array[block_entry][*(existing_block->history)] = update_state(current_state, taken);
+
+			// update history
+			if (taken)
+				*(existing_block->history) = (*(existing_block->history) << 1) | 1;
+			else {
+				*(existing_block->history) = (*(existing_block->history) << 1);
+			}
+		}
+		// block not in BTB - need to replace entry
+		else {
+			existing_block->branch_pc = pc;
+			existing_block->target_pc = targetPc;
+			existing_block->tag = tag;
+			existing_block->history = 0;
+			existing_block->valid = true;
+		}
+
+		// update FSM state
+
+	}
 	
 	return;
 }
 
 void BP_GetStats(SIM_stats *curStats){
 	return;
+}
+
+FSM_state update_state(FSM_state current_state, bool taken) {
+	switch (current_state) {
+		case WT:
+			if (taken)
+				return ST;
+			else
+				return WNT;
+		case ST:
+			if (taken)
+				return ST;
+			else
+				return WT;
+		case WNT:
+			if (taken)
+				return WT;
+			else
+				return SNT;
+		case SNT:
+			if (taken)
+				return WNT;
+			else
+				return SNT;
+		}
+}
+
+uint32_t calc_tag(uint32_t pc) {
+	uint32_t tmp = pc >> 2;
+	int tag_size = BTB->tag_size;
+	int tag_start = log(BTB->btb_size);
+	return (((tmp >> tag_start) << (32 - tag_size)) >> (32 - tag_size));
+}
+
+int find_block(uint32_t pc) {
+	return ((pc >> 2) % BTB->btb_size);
 }
 
