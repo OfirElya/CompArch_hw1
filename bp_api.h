@@ -18,6 +18,34 @@ typedef struct {
 	unsigned size;		      // Theoretical allocated BTB and branch predictor size
 } SIM_stats;
 
+/* A structure to return information about the current BTB block */
+typedef struct {
+	unsigned int branch_pc;
+	unsigned int target_pc;
+	FSM_state current_state;
+	char history;
+	int* tag;
+	bool valid;
+
+} BTB_block;
+
+/* A structure to return information about the BTB */
+typedef struct {
+	BTB_block** btb_blocks;
+	char** historys_p;
+	FSM_state initial_state;
+	bool global;
+	unsigned int tag_size;
+	size_t size;
+} BTB_t;
+
+typedef enum {
+	SNT = 0,
+	WNT,
+	WT,
+	ST
+} FSM_state;
+
 /*************************************************************************/
 /* The following functions should be implemented in your bp.c (or .cpp) */
 /*************************************************************************/
