@@ -18,7 +18,7 @@ typedef struct {
 	uint32_t tag;
 	uint32_t branch_pc;
 	uint32_t target_pc;
-	uint32_t* history;
+	int* history;
 	bool valid;
 
 } BTB_block;
@@ -50,6 +50,11 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	if (BTB == NULL)
 		return -1;
 
+	BTB_block* btb_array = (BTB_block*)malloc(sizeof(BTB_block) * btbSize);
+	if (btb_array == NULL)
+		return -1;
+
+	BTB->btb_blocks = btb_array;
 	BTB->initial_state = fsmState;
 	BTB->global_table = isGlobalTable;
 	BTB->global_history = isGlobalHist;
@@ -58,6 +63,27 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	BTB->btb_size = btbSize;
 	BTB->shared = Shared;
 	BTB->blocks_in_btb = 0;
+
+	if (isGlobalHist) {
+		int* shared_history = (int*)malloc(sizeof(int));
+		if (shared_history == NULL)
+			return -1;
+		*shared_history = 0;
+		for (int i = 0; i < btbSize; i++) {
+			BTB_block* current_block = &btb_array[i];
+			current_block->history = shared_history;
+		}
+	}
+	else {
+		for (int i = 0; i < btbSize; i++) {
+			int* local_history = (int*)malloc(sizeof(int));
+			if (local_history == NULL)
+				return -1;
+			*local_history = 0;
+			BTB_block* current_block = &btb_array[i];
+			current_block->history = local_history;
+		}
+	}
 	
 	return 0;
 }
