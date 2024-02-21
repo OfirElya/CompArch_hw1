@@ -84,6 +84,34 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 			current_block->history = local_history;
 		}
 	}
+
+	uint32_t** fsm_array = (uint32_t**)malloc(sizeof(uint32_t*) * btbSize);
+	if (fsm_array == NULL)
+		return -1;
+	BTB->fsm_array = fsm_array;
+
+	uint32_t fsm_size = pow(2, historySize);
+	fsmState = (uint32_t)fsmState;
+
+	if (isGlobalTable) {
+		uint32_t* global_state = (uint32_t*)malloc(sizeof(uint32_t) * fsm_size);
+		if (global_state == NULL)
+			return -1;
+		for (int j = 0; j < fsm_size; j++)
+			global_state[j] = fsmState;
+		for (int i = 0; i < btbSize; i++)
+			fsm_array[i] = global_state;
+	}
+	else {
+		for (int i = 0; i < btbSize; i++) {
+			fsm_array[i] = (uint32_t*)malloc(sizeof(uint32_t) * fsm_size);
+			if (fsm_array[i] == NULL)
+				return -1;
+			for (int j = 0; j < fsm_size; j++) {
+				fsm_array[i][j] = fsmState;
+			}
+		}
+	}
 	
 	return 0;
 }
@@ -134,26 +162,19 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		empty = true;
 
 	uint32_t tag = calc_tag(pc);
+	uint32_t entry = find_block(pc);
 
 	// first entry in BTB
 	if (empty) {
-		BTB_block* new_block = (BTB_block*)malloc(sizeof(BTB_block));
+		BTB_block* new_block = &(BTB->btb_blocks[entry]);
 		new_block->tag = tag;
 		new_block->branch_pc = pc;
 		new_block->target_pc = targetPc;
 		new_block->valid = true;
-		if (BTB->global_history) {
-			BTB->fsm_array = (uint32_t**)malloc(sizeof(uint32_t*));
-			new_block->history = BTB->fsm_array[0];
-		}
-		else {
-			BTB->fsm_array = (uint32_t**)malloc(sizeof(uint32_t*)*BTB->btb_size);
-			new_block->history = BTB->fsm_array[0];
-		}
 
 		// update FSM state
-		FSM_state current_state = BTB->fsm_array[0][*(new_block->history)];
-		BTB->fsm_array[0][*(new_block->history)] = update_state(current_state, taken);
+		FSM_state current_state = BTB->fsm_array[entry][*(new_block->history)];
+		BTB->fsm_array[entry][*(new_block->history)] = update_state(current_state, taken);
 
 		// update history
 		if (taken)
@@ -164,15 +185,14 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	}
 	//BTB is not empty
 	else {
-		int block_entry = find_block(pc);
-		BTB_block* existing_block = &(BTB->btb_blocks[block_entry]);
+		BTB_block* existing_block = &(BTB->btb_blocks[entry]);
 		
 		// if block already in BTB
 		if (existing_block->tag == tag) {
 
 			// update FSM state
-			FSM_state current_state = BTB->fsm_array[block_entry][*(existing_block->history)];
-			BTB->fsm_array[block_entry][*(existing_block->history)] = update_state(current_state, taken);
+			FSM_state current_state = BTB->fsm_array[entry][*(existing_block->history)];
+			BTB->fsm_array[entry][*(existing_block->history)] = update_state(current_state, taken);
 
 			// update history
 			if (taken)
@@ -186,12 +206,12 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			existing_block->branch_pc = pc;
 			existing_block->target_pc = targetPc;
 			existing_block->tag = tag;
-			existing_block->history = 0;
 			existing_block->valid = true;
 		}
 
 		// update FSM state
-
+		if (!BTB->global_table)
+			BTB->fsm_array[entry][*(existing_block->history)] = BTB->initial_state;
 	}
 	
 	return;
