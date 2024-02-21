@@ -42,6 +42,7 @@ BTB_t* BTB;
 FSM_state update_state(FSM_state current_state, bool taken);
 uint32_t calc_tag(uint32_t pc);
 int find_block(uint32_t pc);
+void update_history(uint32_t* history, bool taken, uint32_t mask);
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
 			bool isGlobalHist, bool isGlobalTable, int Shared){
@@ -63,6 +64,10 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	BTB->btb_size = btbSize;
 	BTB->shared = Shared;
 	BTB->blocks_in_btb = 0;
+
+	for (int i = 0; i < btbSize; i++) {
+		BTB->btb_blocks[i].valid = false;
+	}
 
 	if (isGlobalHist) {
 		int* shared_history = (int*)malloc(sizeof(int));
@@ -157,9 +162,6 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 }
 
 void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
-	bool empty = false;
-	if (!BTB->blocks_in_btb)
-		empty = true;
 
 	uint32_t tag = calc_tag(pc);
 	uint32_t entry = find_block(pc);
@@ -167,67 +169,56 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	for (int i = 1; i < BTB->history_size; i++)
 		history_mask = (history_mask << 1) | 1;
 
-	// first entry in BTB
-	if (empty) {
-		BTB_block* new_block = &(BTB->btb_blocks[entry]);
-		new_block->tag = tag;
-		new_block->branch_pc = pc;
-		new_block->target_pc = targetPc;
-		new_block->valid = true;
+	BTB_block* block = &(BTB->btb_blocks[entry]);
+
+	// if block not in BTB
+	if (!block->valid) {
+		BTB->blocks_in_btb++;
+		block->tag = tag;
+		block->branch_pc = pc;
+		block->target_pc = targetPc;
+		block->valid = true;
 
 		// update FSM state
-		FSM_state current_state = BTB->fsm_array[entry][*(new_block->history)];
-		BTB->fsm_array[entry][*(new_block->history)] = update_state(current_state, taken);
+		FSM_state current_state = BTB->fsm_array[entry][*(block->history)];
+		BTB->fsm_array[entry][*(block->history)] = update_state(current_state, taken);
 
 		// update history
-		if (taken)
-			*(new_block->history) = ((*(new_block->history) << 1) | 1) & history_mask;
-		else {
-			*(new_block->history) = (*(new_block->history) << 1) & history_mask;
-		}
+		update_history(block->history, taken, history_mask);
 	}
 	//BTB is not empty
 	else {
-		BTB_block* existing_block = &(BTB->btb_blocks[entry]);
 		
 		// if block already in BTB
-		if (existing_block->tag == tag) {
+		if (block->tag == tag) {
 
 			// update FSM state
-			FSM_state current_state = BTB->fsm_array[entry][*(existing_block->history)];
-			BTB->fsm_array[entry][*(existing_block->history)] = update_state(current_state, taken);
+			FSM_state current_state = BTB->fsm_array[entry][*(block->history)];
+			BTB->fsm_array[entry][*(block->history)] = update_state(current_state, taken);
 
 			// update history
-			if (taken)
-				*(existing_block->history) = ((*(existing_block->history) << 1) | 1) & history_mask;
-			else {
-				*(existing_block->history) = (*(existing_block->history) << 1) & history_mask;
-			}
+			update_history(block->history, taken, history_mask);
 		}
 		// block not in BTB - need to replace entry
 		else {
-			existing_block->branch_pc = pc;
-			existing_block->target_pc = targetPc;
-			existing_block->tag = tag;
-			existing_block->valid = true;
+			block->branch_pc = pc;
+			block->target_pc = targetPc;
+			block->tag = tag;
+			block->valid = true;
 
 			// update FSM state
 			if (!BTB->global_table)
-				BTB->fsm_array[entry][*(existing_block->history)] = BTB->initial_state;
+				BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
 			else {
-				FSM_state current_state = BTB->fsm_array[entry][*(existing_block->history)];
-				BTB->fsm_array[entry][*(existing_block->history)] = update_state(current_state, taken);
+				FSM_state current_state = BTB->fsm_array[entry][*(block->history)];
+				BTB->fsm_array[entry][*(block->history)] = update_state(current_state, taken);
 			}
 
 			// update history
 			if (!BTB->global_history)
-				existing_block->history = 0;
+				block->history = 0;
 			else {
-				if (taken)
-					*(existing_block->history) = ((*(existing_block->history) << 1) | 1) & history_mask;
-				else {
-					*(existing_block->history) = (*(existing_block->history) << 1) & history_mask;
-				}
+				update_history(block->history, taken, history_mask);
 			}
 		}
 	}
@@ -273,5 +264,14 @@ uint32_t calc_tag(uint32_t pc) {
 
 int find_block(uint32_t pc) {
 	return ((pc >> 2) % BTB->btb_size);
+}
+
+void update_history(uint32_t* history, bool taken, uint32_t mask) {
+	if (taken)
+		*(history) = ((*(history) << 1) | 1) & mask;
+	else {
+		*(history) = (*(history) << 1) & mask;
+	}
+	return;
 }
 
