@@ -278,10 +278,11 @@ int find_block(uint32_t pc) {
 }
 
 void update_history(uint32_t* history, bool taken, uint32_t mask) {
+	uint32_t tmp = *history;
 	if (taken)
-		*(history) = ((*(history) << 1) | 1) & mask;
+		*(history) = ((tmp << 1) | 1) & mask;
 	else {
-		*(history) = (*(history) << 1) & mask;
+		*(history) = (tmp << 1) & mask;
 	}
 	return;
 }
