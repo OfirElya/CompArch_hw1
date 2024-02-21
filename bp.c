@@ -129,12 +129,12 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 	BTB_block* block =&(BTB->btb_blocks[block_entry]);
 
 	if (!BTB->global_table) {
-		prediction = BTB->fsm_array[block_entry][*(block->history)];
+		prediction = BTB->fsm_array[block_entry][*(block->history)] >> 1;
 	}
 	else {
 		switch (BTB->shared) {
 		case 0: //not shared
-			prediction = BTB->fsm_array[0][*(block->history)];
+			prediction = BTB->fsm_array[0][*(block->history)] >> 1;
 			break;
 		case 1: //shared lsb
 			history = *(block->history);
@@ -207,11 +207,26 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			existing_block->target_pc = targetPc;
 			existing_block->tag = tag;
 			existing_block->valid = true;
-		}
 
-		// update FSM state
-		if (!BTB->global_table)
-			BTB->fsm_array[entry][*(existing_block->history)] = BTB->initial_state;
+			// update FSM state
+			if (!BTB->global_table)
+				BTB->fsm_array[entry][*(existing_block->history)] = BTB->initial_state;
+			else {
+				FSM_state current_state = BTB->fsm_array[entry][*(existing_block->history)];
+				BTB->fsm_array[entry][*(existing_block->history)] = update_state(current_state, taken);
+			}
+
+			// update history
+			if (!BTB->global_history)
+				existing_block->history = 0;
+			else {
+				if (taken)
+					*(existing_block->history) = (*(existing_block->history) << 1) | 1;
+				else {
+					*(existing_block->history) = (*(existing_block->history) << 1);
+				}
+			}
+		}
 	}
 	
 	return;
