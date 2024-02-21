@@ -1,6 +1,8 @@
 /* 046267 Computer Architecture - HW #1                                 */
 /* This file should hold your implementation of the predictor simulator */
 
+#define _CRT_SECURE_NO_WARNINGS
+
 #include "bp_api.h"
 #include "math.h"
 
@@ -67,6 +69,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 		return false;
 
 	bool prediction = false;
+	uint32_t history, tmp_pc, location;
 
 	int block_entry = find_block(pc);
 	BTB_block* block =&(BTB->btb_blocks[block_entry]);
@@ -80,15 +83,15 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 			prediction = BTB->fsm_array[0][*(block->history)];
 			break;
 		case 1: //shared lsb
-			uint32_t history = *(block->history);
-			uint32_t tmp_pc = (pc << (30 - BTB->history_size)) >> (30 - BTB->history_size);
-			uint32_t location = (history ^ (tmp_pc >> 2));
+			history = *(block->history);
+			tmp_pc = (pc << (32 - 2 - BTB->history_size)) >> (32 - 2 - BTB->history_size);
+			location = (history ^ (tmp_pc >> 2));
 			prediction = (BTB->fsm_array[0][location]) >> 1;
 			break;
 		case 2: //shared mid
-			uint32_t history = *(block->history);
-			uint32_t tmp_pc = (pc << (32-16 - BTB->history_size)) >> (32-16 - BTB->history_size);
-			uint32_t location = (history ^ (tmp_pc >> 16));
+			history = *(block->history);
+			tmp_pc = (pc << (32 - 16 - BTB->history_size)) >> (32 - 16 - BTB->history_size);
+			location = (history ^ (tmp_pc >> 16));
 			prediction = (BTB->fsm_array[0][location]) >> 1;
 			break;
 		}
@@ -109,7 +112,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	// first entry in BTB
 	if (empty) {
 		BTB_block* new_block = (BTB_block*)malloc(sizeof(BTB_block));
-		new_block->tag = calc_tag(pc);
+		new_block->tag = tag;
 		new_block->branch_pc = pc;
 		new_block->target_pc = targetPc;
 		new_block->valid = true;
