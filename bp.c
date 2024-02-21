@@ -117,11 +117,11 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		new_block->target_pc = targetPc;
 		new_block->valid = true;
 		if (BTB->global_history) {
-			BTB->fsm_array = (uint32_t*)malloc(sizeof(uint32_t));
+			BTB->fsm_array = (uint32_t**)malloc(sizeof(uint32_t*));
 			new_block->history = BTB->fsm_array[0];
 		}
 		else {
-			BTB->fsm_array = (uint32_t*)malloc(sizeof(uint32_t)*BTB->btb_size);
+			BTB->fsm_array = (uint32_t**)malloc(sizeof(uint32_t*)*BTB->btb_size);
 			new_block->history = BTB->fsm_array[0];
 		}
 
