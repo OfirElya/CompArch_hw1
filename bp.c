@@ -18,7 +18,7 @@ typedef struct {
 	uint32_t tag;
 	uint32_t branch_pc;
 	uint32_t target_pc;
-	int* history;
+	uint32_t* history;
 	bool valid;
 
 } BTB_block;
@@ -38,7 +38,10 @@ typedef struct {
 
 } BTB_t;
 
+// global variable - the BTB
 BTB_t* BTB;
+
+// helper functions
 FSM_state update_state(FSM_state current_state, bool taken);
 uint32_t calc_tag(uint32_t pc);
 int find_block(uint32_t pc);
@@ -70,7 +73,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	}
 
 	if (isGlobalHist) {
-		int* shared_history = (int*)malloc(sizeof(int));
+		uint32_t* shared_history = (uint32_t*)malloc(sizeof(uint32_t));
 		if (shared_history == NULL)
 			return -1;
 		*shared_history = 0;
@@ -81,7 +84,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	}
 	else {
 		for (int i = 0; i < btbSize; i++) {
-			int* local_history = (int*)malloc(sizeof(int));
+			uint32_t* local_history = (uint32_t*)malloc(sizeof(uint32_t));
 			if (local_history == NULL)
 				return -1;
 			*local_history = 0;
@@ -180,11 +183,19 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		block->valid = true;
 
 		// update FSM state
-		FSM_state current_state = BTB->fsm_array[entry][*(block->history)];
-		BTB->fsm_array[entry][*(block->history)] = update_state(current_state, taken);
+		if (!BTB->global_table)
+			BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
+		else {
+			FSM_state current_state = BTB->fsm_array[entry][*(block->history)];
+			BTB->fsm_array[entry][*(block->history)] = update_state(current_state, taken);
+		}
 
 		// update history
-		update_history(block->history, taken, history_mask);
+		if (!BTB->global_history)
+			block->history = 0;
+		else {
+			update_history(block->history, taken, history_mask);
+		}
 	}
 	//BTB is not empty
 	else {
