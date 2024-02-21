@@ -163,6 +163,9 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 
 	uint32_t tag = calc_tag(pc);
 	uint32_t entry = find_block(pc);
+	uint32_t history_mask = 1;
+	for (int i = 1; i < BTB->history_size; i++)
+		history_mask = (history_mask << 1) | 1;
 
 	// first entry in BTB
 	if (empty) {
@@ -178,9 +181,9 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 
 		// update history
 		if (taken)
-			*(new_block->history) = (*(new_block->history) << 1) | 1;
+			*(new_block->history) = ((*(new_block->history) << 1) | 1) & history_mask;
 		else {
-			*(new_block->history) = (*(new_block->history) << 1);
+			*(new_block->history) = (*(new_block->history) << 1) & history_mask;
 		}
 	}
 	//BTB is not empty
@@ -196,9 +199,9 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 
 			// update history
 			if (taken)
-				*(existing_block->history) = (*(existing_block->history) << 1) | 1;
+				*(existing_block->history) = ((*(existing_block->history) << 1) | 1) & history_mask;
 			else {
-				*(existing_block->history) = (*(existing_block->history) << 1);
+				*(existing_block->history) = (*(existing_block->history) << 1) & history_mask;
 			}
 		}
 		// block not in BTB - need to replace entry
@@ -221,9 +224,9 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 				existing_block->history = 0;
 			else {
 				if (taken)
-					*(existing_block->history) = (*(existing_block->history) << 1) | 1;
+					*(existing_block->history) = ((*(existing_block->history) << 1) | 1) & history_mask;
 				else {
-					*(existing_block->history) = (*(existing_block->history) << 1);
+					*(existing_block->history) = (*(existing_block->history) << 1) & history_mask;
 				}
 			}
 		}
