@@ -5,7 +5,7 @@
 
 #include "bp_api.h"
 #include "math.h"
-
+#include <stdio.h>
 typedef enum {
 	SNT = 0,
 	WNT,
@@ -125,10 +125,10 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 }
 
 bool BP_predict(uint32_t pc, uint32_t *dst){
-	
 	*dst = pc + 4;
 	if (!BTB->blocks_in_btb)
 		return false;
+
 
 	bool prediction = false;
 	uint32_t history, tmp_pc, location;
@@ -136,25 +136,35 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 	int block_entry = find_block(pc);
 	BTB_block* block =&(BTB->btb_blocks[block_entry]);
 
+    uint32_t tag = calc_tag(pc);
+
 	if (!BTB->global_table) {
 		prediction = BTB->fsm_array[block_entry][*(block->history)] >> 1;
+        if(tag != block->tag)
+            prediction = false;
 	}
 	else {
 		switch (BTB->shared) {
 		case 0: //not shared
 			prediction = BTB->fsm_array[0][*(block->history)] >> 1;
+            if(tag != block->tag)
+                prediction = BTB->initial_state >> 1;
 			break;
 		case 1: //shared lsb
 			history = *(block->history);
 			tmp_pc = (pc << (32 - 2 - BTB->history_size)) >> (32 - 2 - BTB->history_size);
 			location = (history ^ (tmp_pc >> 2));
 			prediction = (BTB->fsm_array[0][location]) >> 1;
+            if(tag != block->tag)
+                prediction = BTB->initial_state >> 1;
 			break;
 		case 2: //shared mid
 			history = *(block->history);
 			tmp_pc = (pc << (32 - 16 - BTB->history_size)) >> (32 - 16 - BTB->history_size);
 			location = (history ^ (tmp_pc >> 16));
 			prediction = (BTB->fsm_array[0][location]) >> 1;
+            if(tag != block->tag)
+                prediction = BTB->initial_state >> 1;
 			break;
 		}
 	}
@@ -165,7 +175,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 }
 
 void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
-
+//    printf("got here with history %d, will update according to %d, fsm_array : ", *BTB->btb_blocks[0].history, taken);
 	uint32_t tag = calc_tag(pc);
 	uint32_t entry = find_block(pc);
 	uint32_t history_mask = 1;
@@ -173,7 +183,11 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		history_mask = (history_mask << 1) | 1;
 
 	BTB_block* block = &(BTB->btb_blocks[entry]);
+    int first_time = BTB->fsm_array[0][*(block->history)];
 
+//    for(int i =0;i<4;i++)
+//        printf(" %d",BTB->fsm_array[0][i]);
+//    printf(" -> ");
 	// if block not in BTB
 	if (!block->valid) {
 		BTB->blocks_in_btb++;
@@ -189,17 +203,17 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			FSM_state current_state = BTB->fsm_array[entry][*(block->history)];
 			BTB->fsm_array[entry][*(block->history)] = update_state(current_state, taken);
 		}
-
 		// update history
 		if (!BTB->global_history)
-			block->history = 0;
+			*block->history = 0;
 		else {
 			update_history(block->history, taken, history_mask);
 		}
+
 	}
 	//BTB is not empty
 	else {
-		
+
 		// if block already in BTB
 		if (block->tag == tag) {
 
@@ -227,13 +241,17 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 
 			// update history
 			if (!BTB->global_history)
-				block->history = 0;
+				*block->history = 0;
 			else {
 				update_history(block->history, taken, history_mask);
 			}
 		}
 	}
-	
+//    for(int i =0;i<4;i++)
+//        printf(" %d",BTB->fsm_array[0][i]);
+//    printf("\n");
+//    printf("%d ",first_time);
+//    printf("-> %d ", BTB->fsm_array[0][*(block->history)]);
 	return;
 }
 
@@ -264,6 +282,7 @@ FSM_state update_state(FSM_state current_state, bool taken) {
 			else
 				return SNT;
 		}
+
 }
 
 uint32_t calc_tag(uint32_t pc) {
