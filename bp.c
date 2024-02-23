@@ -6,6 +6,7 @@
 #include "bp_api.h"
 #include "math.h"
 #include <stdio.h>
+
 typedef enum {
 	SNT = 0,
 	WNT,
@@ -46,7 +47,7 @@ FSM_state update_state(FSM_state current_state, bool taken);
 uint32_t calc_tag(uint32_t pc);
 int find_block(uint32_t pc);
 void update_history(uint32_t* history, bool taken, uint32_t mask);
-int calcSharedEntry(int shared, uint32_t history,uint32_t pc);
+int calcSharedEntry(int shared, uint32_t history,uint32_t pc, uint32_t history_size);
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
 			bool isGlobalHist, bool isGlobalTable, int Shared){
@@ -130,26 +131,29 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 	if (!BTB->blocks_in_btb)
 		return false;
 
-
 	bool prediction = false;
 	uint32_t history, tmp_pc, location;
 
 	int block_entry = find_block(pc);
-	BTB_block* block =&(BTB->btb_blocks[block_entry]);
-
+	BTB_block* block = &(BTB->btb_blocks[block_entry]);
     uint32_t tag = calc_tag(pc);
 
-	if (!BTB->global_table) {
-		prediction = BTB->fsm_array[block_entry][*(block->history)] >> 1;
-        if(tag != block->tag)
-            prediction = false;
+	if (!BTB->global_table) { // local histories
+		if (tag != block->tag) // if wanted tag is not in BTB, predict NT
+			prediction = false;
+		else // tag exists in BTB
+			prediction = BTB->fsm_array[block_entry][*(block->history)] >> 1;
 	}
-	else {
-        location = calcSharedEntry(BTB->shared, *(block->history), pc);
-        prediction = (BTB->fsm_array[0][location]) >> 1;
-        if(tag != block->tag)
-            prediction = BTB->initial_state >> 1;
+	else { // global history
+		if (tag != block->tag) // if wanted tag is not in BTB, predict NT
+			prediction = BTB->initial_state >> 1;
+		else { // tag exists in BTB
+			location = calcSharedEntry(BTB->shared, *(block->history), pc, BTB->history_size);
+			prediction = (BTB->fsm_array[0][location]) >> 1;
+		}
 	}
+
+	// if prediction is TAKEN, update dst address
 	if (prediction)
 		*dst = block->target_pc;
 	return prediction;
@@ -159,8 +163,10 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 //    printf("got here with history %d, will update according to %d, fsm_array : ", *BTB->btb_blocks[0].history, taken);
 	uint32_t tag = calc_tag(pc);
 	uint32_t entry = find_block(pc);
+	FSM_state current_state;
+	int location;
+
 	uint32_t history_mask = 1;
-    int location;
 	for (int i = 1; i < BTB->history_size; i++)
 		history_mask = (history_mask << 1) | 1;
 
@@ -170,6 +176,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 //    for(int i =0;i<4;i++)
 //        printf(" %d",BTB->fsm_array[0][i]);
 //    printf(" -> ");
+
 	// if block not in BTB
 	if (!block->valid) {
 		BTB->blocks_in_btb++;
@@ -181,10 +188,10 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		// update FSM state
 		if (!BTB->global_table)
 			BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
-		else {
-            location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc);
-			FSM_state current_state = BTB->fsm_array[entry][location];
-			BTB->fsm_array[entry][*(block->history)] = update_state(current_state, taken);
+		else { // global history
+            location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+			current_state = BTB->fsm_array[entry][location];
+			BTB->fsm_array[entry][location] = update_state(current_state, taken);
 		}
 		// update history
 		if (!BTB->global_history)
@@ -194,15 +201,15 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		}
 
 	}
-	//BTB is not empty
+	// A block exists in wanted entry
 	else {
 
-		// if block already in BTB
+		// if block is the wanted block
 		if (block->tag == tag) {
 
 			// update FSM state
-            location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc);
-            FSM_state current_state = BTB->fsm_array[entry][location];
+            location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+            current_state = BTB->fsm_array[entry][location];
 			BTB->fsm_array[entry][location] = update_state(current_state, taken);
 
 			// update history
@@ -219,8 +226,8 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			if (!BTB->global_table)
 				BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
 			else {
-                location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc);
-                FSM_state current_state = BTB->fsm_array[entry][location];
+                location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+                current_state = BTB->fsm_array[entry][location];
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
 			}
 
@@ -244,6 +251,7 @@ void BP_GetStats(SIM_stats *curStats){
 	return;
 }
 
+// update the state of the FSM according the current state and TAKEN/NOT TAKEN
 FSM_state update_state(FSM_state current_state, bool taken) {
 	switch (current_state) {
 		case WT:
@@ -270,6 +278,7 @@ FSM_state update_state(FSM_state current_state, bool taken) {
 
 }
 
+// calculate the tag from the pc according to btb size and tag size
 uint32_t calc_tag(uint32_t pc) {
 	uint32_t tmp = pc >> 2;
 	int tag_size = BTB->tag_size;
@@ -277,6 +286,7 @@ uint32_t calc_tag(uint32_t pc) {
 	return (((tmp >> tag_start) << (32 - tag_size)) >> (32 - tag_size));
 }
 
+// calculate the entry in btb array according to btb size bits in pc
 int find_block(uint32_t pc) {
 	return ((pc >> 2) % BTB->btb_size);
 }
@@ -291,24 +301,22 @@ void update_history(uint32_t* history, bool taken, uint32_t mask) {
 	return;
 }
 
-
-
-int calcSharedEntry(int shared, uint32_t history,uint32_t pc){
-    uint32_t tmp_pc, location;
+// return the location in the fsm array of wanted entry according to pc and share policy
+int calcSharedEntry(int shared, uint32_t history ,uint32_t pc, uint32_t history_size){
+	uint32_t tmp_pc;
+	int location = history;
     switch (shared) {
         case 0: //not shared
-            return history;
+            location = history;
             break;
         case 1: //shared lsb
-            tmp_pc = (pc << (32 - 2 - BTB->history_size)) >> (32 - 2 - BTB->history_size);
+            tmp_pc = (pc << (32 - 2 - history_size)) >> (32 - 2 - history_size);
             location = (history ^ (tmp_pc >> 2));
-            return location;
             break;
         case 2: //shared mid
-            tmp_pc = (pc << (32 - 16 - BTB->history_size)) >> (32 - 16 - BTB->history_size);
+            tmp_pc = (pc << (32 - 16 - history_size)) >> (32 - 16 - history_size);
             location = (history ^ (tmp_pc >> 16));
-            return location;
             break;
     }
-    return history;
+    return location;
 }
