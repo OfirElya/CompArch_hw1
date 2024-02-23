@@ -182,13 +182,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	// calc location in fsm array
 	int location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 	FSM_state current_state = BTB->fsm_array[entry][location];
-	
-
-//    int first_time = BTB->fsm_array[0][*(block->history)];
-
-//    for(int i =0;i<4;i++)
-//        printf(" %d",BTB->fsm_array[0][i]);
-//    printf(" -> ");
+	printf("tag 0x%x entry %d location %d state %d history %d\n", tag, entry, location, current_state, *block->history);
 
 	// if block not in BTB
 	if (!block->valid) {
@@ -236,24 +230,25 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 				BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
 				current_state = BTB->initial_state;
 			}
-			else
+			else {
+				printf("BTB->fsm_array[entry][0] = %d\n", BTB->fsm_array[entry][0]);
+				printf("BTB->fsm_array[entry][1] = %d\n", BTB->fsm_array[entry][1]);
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
+			}
 
 			// update history
 			if (!BTB->global_history)
 				*block->history = 0;
-			else 
+			else {
+				uint32_t old_history = *block->history;
 				update_history(block->history, taken, history_mask);
+				printf("block->history = %d --> %d\n", old_history, *block->history);
+			}
 		}
 	}
 
 	is_flush(current_state, taken);
 
-//    for(int i =0;i<4;i++)
-//        printf(" %d",BTB->fsm_array[0][i]);
-//    printf("\n");
-//    printf("%d ",first_time);
-//    printf("-> %d ", BTB->fsm_array[0][*(block->history)]);
 	return;
 }
 
@@ -370,6 +365,8 @@ void is_flush(FSM_state current_state, bool taken) {
 	bool prediction = current_state >> 1;
 	if (prediction != taken)
 		BTB->flushes++;
+
+	printf("current state is %d, taken is %d, num flushes is %d\n\n", current_state, taken, BTB->flushes);
 	return;
 }
 

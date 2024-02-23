@@ -11,8 +11,6 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <malloc.h>
-
 /* A structure to return information about the currect simulator state */
 typedef struct {
 	unsigned flush_num;           // Machine flushes
@@ -23,6 +21,7 @@ typedef struct {
 /*************************************************************************/
 /* The following functions should be implemented in your bp.c (or .cpp) */
 /*************************************************************************/
+
 /*
  * BP_init - initialize the predictor
  * all input parameters are set (by the main) as declared in the trace file
@@ -53,6 +52,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst);
  * curStats: The returned current simulator state (only after BP_update)
  */
 void BP_GetStats(SIM_stats *curStats);
+
 
 #ifdef __cplusplus
 }
