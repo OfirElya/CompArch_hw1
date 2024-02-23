@@ -138,7 +138,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 		return false;
 
 	bool prediction = false;
-	uint32_t history, tmp_pc, location;
+	uint32_t location;
 
 	int block_entry = find_block(pc);
 	BTB_block* block = &(BTB->btb_blocks[block_entry]);
@@ -291,29 +291,34 @@ void BP_GetStats(SIM_stats *curStats){
 
 // update the state of the FSM according the current state and TAKEN/NOT TAKEN
 FSM_state update_state(FSM_state current_state, bool taken) {
+	FSM_state new_state = WNT;
 	switch (current_state) {
 		case WT:
 			if (taken)
-				return ST;
+				new_state = ST;
 			else
-				return WNT;
+				new_state = WNT;
+			break;
 		case ST:
 			if (taken)
-				return ST;
+				new_state = ST;
 			else
-				return WT;
+				new_state = WT;
+			break;
 		case WNT:
 			if (taken)
-				return WT;
+				new_state = WT;
 			else
-				return SNT;
+				new_state = SNT;
+			break;
 		case SNT:
 			if (taken)
-				return WNT;
+				new_state = WNT;
 			else
-				return SNT;
+				new_state = SNT;
+			break;
 		}
-
+	return new_state;
 }
 
 // calculate the tag from the pc according to btb size and tag size
