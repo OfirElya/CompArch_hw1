@@ -6,6 +6,7 @@
 #include "bp_api.h"
 #include "math.h"
 #include <stdio.h>
+#include <malloc.h>
 
 typedef enum {
 	SNT = 0,
