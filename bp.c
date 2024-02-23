@@ -145,13 +145,13 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 	BTB_block* block = &(BTB->btb_blocks[block_entry]);
     uint32_t tag = calc_tag(pc);
 
-	if (!BTB->global_table) { // local histories
+	if (!BTB->global_table) { // local tables
 		if (tag != block->tag) // if wanted tag is not in BTB, predict NT
 			prediction = false;
 		else // tag exists in BTB
 			prediction = BTB->fsm_array[block_entry][*(block->history)] >> 1;
 	}
-	else { // global history
+	else { // global table
 		if (tag != block->tag) // if wanted tag is not in BTB, predict NT
 			prediction = BTB->initial_state >> 1;
 		else { // tag exists in BTB
@@ -182,7 +182,6 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	// calc location in fsm array
 	int location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 	FSM_state current_state = BTB->fsm_array[entry][location];
-	printf("tag 0x%x entry %d location %d state %d history %d\n", tag, entry, location, current_state, *block->history);
 
 	// if block not in BTB
 	if (!block->valid) {
@@ -231,8 +230,6 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 				current_state = BTB->initial_state;
 			}
 			else {
-				printf("BTB->fsm_array[entry][0] = %d\n", BTB->fsm_array[entry][0]);
-				printf("BTB->fsm_array[entry][1] = %d\n", BTB->fsm_array[entry][1]);
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
 			}
 
@@ -240,9 +237,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			if (!BTB->global_history)
 				*block->history = 0;
 			else {
-				uint32_t old_history = *block->history;
 				update_history(block->history, taken, history_mask);
-				printf("block->history = %d --> %d\n", old_history, *block->history);
 			}
 		}
 	}
@@ -365,8 +360,6 @@ void is_flush(FSM_state current_state, bool taken) {
 	bool prediction = current_state >> 1;
 	if (prediction != taken)
 		BTB->flushes++;
-
-	printf("current state is %d, taken is %d, num flushes is %d\n\n", current_state, taken, BTB->flushes);
 	return;
 }
 
