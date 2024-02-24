@@ -8,6 +8,9 @@
 #include <stdio.h>
 #include <malloc.h>
 
+#define FAILURE -1
+#define PC_SIZE 32
+
 typedef enum {
 	SNT = 0,
 	WNT,
@@ -59,11 +62,11 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 
 	BTB = (BTB_t*)malloc(sizeof(BTB_t));
 	if (BTB == NULL)
-		return -1;
+		return FAILURE;
 
 	BTB_block* btb_array = (BTB_block*)malloc(sizeof(BTB_block) * btbSize);
 	if (btb_array == NULL)
-		return -1;
+		return FAILURE;
 
 	BTB->btb_blocks = btb_array;
 	BTB->initial_state = fsmState;
@@ -84,7 +87,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	if (isGlobalHist) {
 		uint32_t* shared_history = (uint32_t*)malloc(historySize);
 		if (shared_history == NULL)
-			return -1;
+			return FAILURE;
 		*shared_history = 0;
 		for (int i = 0; i < btbSize; i++) {
 			BTB_block* current_block = &btb_array[i];
@@ -95,7 +98,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 		for (int i = 0; i < btbSize; i++) {
 			uint32_t* local_history = (uint32_t*)malloc(historySize);
 			if (local_history == NULL)
-				return -1;
+				return FAILURE;
 			*local_history = 0;
 			BTB_block* current_block = &btb_array[i];
 			current_block->history = local_history;
@@ -104,7 +107,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 
 	uint32_t** fsm_array = (uint32_t**)malloc(sizeof(uint32_t*) * btbSize);
 	if (fsm_array == NULL)
-		return -1;
+		return FAILURE;
 	BTB->fsm_array = fsm_array;
 
 	uint32_t fsm_size = pow(2, historySize);
@@ -113,7 +116,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	if (isGlobalTable) {
 		uint32_t* global_state = (uint32_t*)malloc(2 * fsm_size);
 		if (global_state == NULL)
-			return -1;
+			return FAILURE;
 		for (int j = 0; j < fsm_size; j++)
 			global_state[j] = fsmState;
 		for (int i = 0; i < btbSize; i++)
@@ -123,7 +126,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 		for (int i = 0; i < btbSize; i++) {
 			fsm_array[i] = (uint32_t*)malloc(2 * fsm_size);
 			if (fsm_array[i] == NULL)
-				return -1;
+				return FAILURE;
 			for (int j = 0; j < fsm_size; j++) {
 				fsm_array[i][j] = fsmState;
 			}
@@ -181,8 +184,6 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	// calc location in fsm array
 	int location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 	FSM_state current_state = BTB->fsm_array[entry][location];
-
-	uint32_t old_history = *block->history;
 
 	// if block not in BTB
 	if (!block->valid) {
@@ -254,12 +255,12 @@ void BP_GetStats(SIM_stats* curStats) {
 	curStats->flush_num = BTB->flushes;
 
 	int size = 0;
-	int target_pc_size = 32;
+	int target_pc_size = PC_SIZE - 2;
 	int valid_size = 1;
 	int state_size = 2*pow(2, BTB->history_size);
-	int blocks_num = pow(2, BTB->btb_size);
+	int blocks_num = BTB->btb_size;
 
-	size = blocks_num * (BTB->tag_size /*+ target_pc_size*/ + valid_size);
+	size = blocks_num * (BTB->tag_size + target_pc_size + valid_size);
 
 	if (BTB->global_history) {
 		size += BTB->history_size;
@@ -319,7 +320,7 @@ uint32_t calc_tag(uint32_t pc) {
 	uint32_t tmp = pc >> 2;
 	int tag_size = BTB->tag_size;
 	int tag_start = log(BTB->btb_size);
-	return (((tmp >> tag_start) << (32 - tag_size)) >> (32 - tag_size));
+	return (((tmp >> tag_start) << (PC_SIZE - tag_size)) >> (PC_SIZE - tag_size));
 }
 
 // calculate the entry in btb array according to btb size bits in pc
@@ -346,11 +347,11 @@ int calcSharedEntry(int shared, uint32_t history, uint32_t pc, uint32_t history_
 		location = history;
 		break;
 	case 1: //shared lsb
-		tmp_pc = (pc << (32 - 2 - history_size)) >> (32 - 2 - history_size);
+		tmp_pc = (pc << (PC_SIZE - 2 - history_size)) >> (PC_SIZE - 2 - history_size);
 		location = (history ^ (tmp_pc >> 2));
 		break;
 	case 2: //shared mid
-		tmp_pc = (pc << (32 - 16 - history_size)) >> (32 - 16 - history_size);
+		tmp_pc = (pc << (PC_SIZE - 16 - history_size)) >> (PC_SIZE - 16 - history_size);
 		location = (history ^ (tmp_pc >> 16));
 		break;
 	}
