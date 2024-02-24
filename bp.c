@@ -68,6 +68,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	if (btb_array == NULL)
 		return FAILURE;
 
+	// initialize BTB
 	BTB->btb_blocks = btb_array;
 	BTB->initial_state = fsmState;
 	BTB->global_table = isGlobalTable;
@@ -80,12 +81,17 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	BTB->flushes = 0;
 	BTB->updates = 0;
 
+	// initialize btb blocks array
 	for (int i = 0; i < btbSize; i++) {
 		BTB->btb_blocks[i].valid = false;
+		BTB->btb_blocks[i].branch_pc = 0;
+		BTB->btb_blocks[i].target_pc = 0;
+		BTB->btb_blocks[i].tag = 0;
 	}
 
+	// initialize histories
 	if (isGlobalHist) {
-		uint32_t* shared_history = (uint32_t*)malloc(historySize);
+		uint32_t* shared_history = (uint32_t*)malloc(sizeof(uint32_t));
 		if (shared_history == NULL)
 			return FAILURE;
 		*shared_history = 0;
@@ -96,7 +102,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	}
 	else {
 		for (int i = 0; i < btbSize; i++) {
-			uint32_t* local_history = (uint32_t*)malloc(historySize);
+			uint32_t* local_history = (uint32_t*)malloc(sizeof(uint32_t));
 			if (local_history == NULL)
 				return FAILURE;
 			*local_history = 0;
@@ -105,16 +111,17 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 		}
 	}
 
+	// create fsm state array
 	uint32_t** fsm_array = (uint32_t**)malloc(sizeof(uint32_t*) * btbSize);
 	if (fsm_array == NULL)
 		return FAILURE;
 	BTB->fsm_array = fsm_array;
 
 	uint32_t fsm_size = pow(2, historySize);
-	//fsmState = (uint32_t)fsmState;
 
+	// initialize fsm state array
 	if (isGlobalTable) {
-		uint32_t* global_state = (uint32_t*)malloc(2 * fsm_size);
+		uint32_t* global_state = (uint32_t*)malloc(sizeof(uint32_t) * fsm_size);
 		if (global_state == NULL)
 			return FAILURE;
 		for (int j = 0; j < fsm_size; j++)
@@ -124,7 +131,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	}
 	else {
 		for (int i = 0; i < btbSize; i++) {
-			fsm_array[i] = (uint32_t*)malloc(2 * fsm_size);
+			fsm_array[i] = (uint32_t*)malloc(sizeof(uint32_t) * fsm_size);
 			if (fsm_array[i] == NULL)
 				return FAILURE;
 			for (int j = 0; j < fsm_size; j++) {
@@ -137,27 +144,38 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 }
 
 bool BP_predict(uint32_t pc, uint32_t* dst) {
+	
 	*dst = pc + 4;
+	
+	// if BTB is empty predict NT
 	if (!BTB->blocks_in_btb)
 		return false;
 
-	bool prediction = false;
-	uint32_t location;
+	bool prediction = false; // default value
+
+	// location points to the entry in fsm array that correlates to current history and share status
+	uint32_t location;    
 
 	int block_entry = find_block(pc);
 	BTB_block* block = &(BTB->btb_blocks[block_entry]);
 	uint32_t tag = calc_tag(pc);
 
-	if (!BTB->global_table) { // local tables
-		if (tag != block->tag) // if wanted tag is not in BTB, predict NT
+	// local tables
+	if (!BTB->global_table) { 
+		// if wanted tag is not in BTB, predict NT
+		if (tag != block->tag) 
 			prediction = false;
-		else // tag exists in BTB
+		// if tag exists in BTB, predict by state and history
+		else 
 			prediction = BTB->fsm_array[block_entry][*(block->history)] >> 1;
 	}
-	else { // global table
-		if (tag != block->tag) // if wanted tag is not in BTB, predict NT
+	// global table
+	else { 
+		// if wanted tag is not in BTB, predict NT
+		if (tag != block->tag) 
 			prediction = false;
-		else { // tag exists in BTB
+		// tag exists in BTB, predict by state and history
+		else { 
 			location = calcSharedEntry(BTB->shared, *(block->history), pc, BTB->history_size);
 			prediction = (BTB->fsm_array[block_entry][location]) >> 1;
 		}
@@ -166,6 +184,7 @@ bool BP_predict(uint32_t pc, uint32_t* dst) {
 	// if prediction is TAKEN, update dst address
 	if (prediction)
 		*dst = block->target_pc;
+
 	return prediction;
 }
 
@@ -183,9 +202,10 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	BTB_block* block = &(BTB->btb_blocks[entry]);
 	// calc location in fsm array
 	int location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+	// get current state of specified entry
 	FSM_state current_state = BTB->fsm_array[entry][location];
 
-	// if block not in BTB
+	// if BTB entry is empty
 	if (!block->valid) {
 		BTB->blocks_in_btb++;
 		block->tag = tag;
@@ -194,16 +214,20 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		block->valid = true;
 
 		// update FSM state
+		// local tables
 		if (!BTB->global_table) {
 			BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
 			current_state = BTB->initial_state;
 		}
+		// global table
 		else
 			BTB->fsm_array[entry][location] = update_state(current_state, taken);
 
 		// update history
+		// local histories
 		if (!BTB->global_history)
 			*block->history = 0;
+		// global history
 		else
 			update_history(block->history, taken, history_mask);
 	}
@@ -227,10 +251,12 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			block->valid = true;
 
 			// update FSM state
+			// local tables
 			if (!BTB->global_table) {
 				BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
 				current_state = BTB->initial_state;
 			}
+			// global table
 			else {
 				location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
@@ -238,13 +264,17 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			}
 
 			// update history
+			// local histories
 			if (!BTB->global_history)
 				*block->history = 0;
+			// global history
 			else {
 				update_history(block->history, taken, history_mask);
 			}
 		}
 	}
+
+	// check for flushes
 	is_flush(current_state, taken);
 
 	return;
@@ -366,6 +396,7 @@ void is_flush(FSM_state current_state, bool taken) {
 	return;
 }
 
+// free all allocated space
 void free_space(bool global_history, bool global_table) {
 	uint32_t** fsm_array = BTB->fsm_array;
 	BTB_block* btb_array = BTB->btb_blocks;
