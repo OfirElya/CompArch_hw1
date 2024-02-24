@@ -50,12 +50,12 @@ FSM_state update_state(FSM_state current_state, bool taken);
 uint32_t calc_tag(uint32_t pc);
 int find_block(uint32_t pc);
 void update_history(uint32_t* history, bool taken, uint32_t mask);
-int calcSharedEntry(int shared, uint32_t history,uint32_t pc, uint32_t history_size);
+int calcSharedEntry(int shared, uint32_t history, uint32_t pc, uint32_t history_size);
 void is_flush(FSM_state current_state, bool taken);
 void free_space(bool global_history, bool global_table);
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
-			bool isGlobalHist, bool isGlobalTable, int Shared){
+	bool isGlobalHist, bool isGlobalTable, int Shared) {
 
 	BTB = (BTB_t*)malloc(sizeof(BTB_t));
 	if (BTB == NULL)
@@ -82,7 +82,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	}
 
 	if (isGlobalHist) {
-		uint32_t* shared_history = (uint32_t*)malloc(sizeof(uint32_t));
+		uint32_t* shared_history = (uint32_t*)malloc(historySize);
 		if (shared_history == NULL)
 			return -1;
 		*shared_history = 0;
@@ -93,7 +93,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	}
 	else {
 		for (int i = 0; i < btbSize; i++) {
-			uint32_t* local_history = (uint32_t*)malloc(sizeof(uint32_t));
+			uint32_t* local_history = (uint32_t*)malloc(historySize);
 			if (local_history == NULL)
 				return -1;
 			*local_history = 0;
@@ -108,10 +108,10 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	BTB->fsm_array = fsm_array;
 
 	uint32_t fsm_size = pow(2, historySize);
-	fsmState = (uint32_t)fsmState;
+	//fsmState = (uint32_t)fsmState;
 
 	if (isGlobalTable) {
-		uint32_t* global_state = (uint32_t*)malloc(sizeof(uint32_t) * fsm_size);
+		uint32_t* global_state = (uint32_t*)malloc(2 * fsm_size);
 		if (global_state == NULL)
 			return -1;
 		for (int j = 0; j < fsm_size; j++)
@@ -121,7 +121,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	}
 	else {
 		for (int i = 0; i < btbSize; i++) {
-			fsm_array[i] = (uint32_t*)malloc(sizeof(uint32_t) * fsm_size);
+			fsm_array[i] = (uint32_t*)malloc(2 * fsm_size);
 			if (fsm_array[i] == NULL)
 				return -1;
 			for (int j = 0; j < fsm_size; j++) {
@@ -129,11 +129,11 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 			}
 		}
 	}
-	
+
 	return 0;
 }
 
-bool BP_predict(uint32_t pc, uint32_t *dst){
+bool BP_predict(uint32_t pc, uint32_t* dst) {
 	*dst = pc + 4;
 	if (!BTB->blocks_in_btb)
 		return false;
@@ -143,7 +143,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 
 	int block_entry = find_block(pc);
 	BTB_block* block = &(BTB->btb_blocks[block_entry]);
-    uint32_t tag = calc_tag(pc);
+	uint32_t tag = calc_tag(pc);
 
 	if (!BTB->global_table) { // local tables
 		if (tag != block->tag) // if wanted tag is not in BTB, predict NT
@@ -153,10 +153,10 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 	}
 	else { // global table
 		if (tag != block->tag) // if wanted tag is not in BTB, predict NT
-			prediction = BTB->initial_state >> 1;
+			prediction = false;
 		else { // tag exists in BTB
 			location = calcSharedEntry(BTB->shared, *(block->history), pc, BTB->history_size);
-			prediction = (BTB->fsm_array[0][location]) >> 1;
+			prediction = (BTB->fsm_array[block_entry][location]) >> 1;
 		}
 	}
 
@@ -167,8 +167,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 }
 
 void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
-//    printf("got here with history %d, will update according to %d, fsm_array : ", *BTB->btb_blocks[0].history, taken);
-	
+
 	BTB->updates++;
 
 	uint32_t tag = calc_tag(pc);
@@ -182,6 +181,8 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	// calc location in fsm array
 	int location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 	FSM_state current_state = BTB->fsm_array[entry][location];
+
+	uint32_t old_history = *block->history;
 
 	// if block not in BTB
 	if (!block->valid) {
@@ -198,7 +199,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		}
 		else
 			BTB->fsm_array[entry][location] = update_state(current_state, taken);
-		
+
 		// update history
 		if (!BTB->global_history)
 			*block->history = 0;
@@ -225,12 +226,14 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			block->valid = true;
 
 			// update FSM state
-			if (!BTB->global_table){
+			if (!BTB->global_table) {
 				BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
 				current_state = BTB->initial_state;
 			}
 			else {
+				location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
+				current_state = WNT;
 			}
 
 			// update history
@@ -241,23 +244,22 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			}
 		}
 	}
-
 	is_flush(current_state, taken);
 
 	return;
 }
 
-void BP_GetStats(SIM_stats *curStats){
+void BP_GetStats(SIM_stats* curStats) {
 	curStats->br_num = BTB->updates;
 	curStats->flush_num = BTB->flushes;
 
 	int size = 0;
 	int target_pc_size = 32;
 	int valid_size = 1;
-	int state_size = 2;
-
+	int state_size = 2*pow(2, BTB->history_size);
 	int blocks_num = pow(2, BTB->btb_size);
-	size = blocks_num * (BTB->tag_size + target_pc_size + valid_size);
+
+	size = blocks_num * (BTB->tag_size /*+ target_pc_size*/ + valid_size);
 
 	if (BTB->global_history) {
 		size += BTB->history_size;
@@ -284,31 +286,31 @@ void BP_GetStats(SIM_stats *curStats){
 FSM_state update_state(FSM_state current_state, bool taken) {
 	FSM_state new_state = WNT;
 	switch (current_state) {
-		case WT:
-			if (taken)
-				new_state = ST;
-			else
-				new_state = WNT;
-			break;
-		case ST:
-			if (taken)
-				new_state = ST;
-			else
-				new_state = WT;
-			break;
-		case WNT:
-			if (taken)
-				new_state = WT;
-			else
-				new_state = SNT;
-			break;
-		case SNT:
-			if (taken)
-				new_state = WNT;
-			else
-				new_state = SNT;
-			break;
-		}
+	case WT:
+		if (taken)
+			new_state = ST;
+		else
+			new_state = WNT;
+		break;
+	case ST:
+		if (taken)
+			new_state = ST;
+		else
+			new_state = WT;
+		break;
+	case WNT:
+		if (taken)
+			new_state = WT;
+		else
+			new_state = SNT;
+		break;
+	case SNT:
+		if (taken)
+			new_state = WNT;
+		else
+			new_state = SNT;
+		break;
+	}
 	return new_state;
 }
 
@@ -336,23 +338,23 @@ void update_history(uint32_t* history, bool taken, uint32_t mask) {
 }
 
 // return the location in the fsm array of wanted entry according to pc and share policy
-int calcSharedEntry(int shared, uint32_t history ,uint32_t pc, uint32_t history_size){
+int calcSharedEntry(int shared, uint32_t history, uint32_t pc, uint32_t history_size) {
 	uint32_t tmp_pc;
 	int location = history;
-    switch (shared) {
-        case 0: //not shared
-            location = history;
-            break;
-        case 1: //shared lsb
-            tmp_pc = (pc << (32 - 2 - history_size)) >> (32 - 2 - history_size);
-            location = (history ^ (tmp_pc >> 2));
-            break;
-        case 2: //shared mid
-            tmp_pc = (pc << (32 - 16 - history_size)) >> (32 - 16 - history_size);
-            location = (history ^ (tmp_pc >> 16));
-            break;
-    }
-    return location;
+	switch (shared) {
+	case 0: //not shared
+		location = history;
+		break;
+	case 1: //shared lsb
+		tmp_pc = (pc << (32 - 2 - history_size)) >> (32 - 2 - history_size);
+		location = (history ^ (tmp_pc >> 2));
+		break;
+	case 2: //shared mid
+		tmp_pc = (pc << (32 - 16 - history_size)) >> (32 - 16 - history_size);
+		location = (history ^ (tmp_pc >> 16));
+		break;
+	}
+	return location;
 }
 
 // count the number of flushes
@@ -366,7 +368,7 @@ void is_flush(FSM_state current_state, bool taken) {
 void free_space(bool global_history, bool global_table) {
 	uint32_t** fsm_array = BTB->fsm_array;
 	BTB_block* btb_array = BTB->btb_blocks;
-	
+
 	if (global_table) {
 		free(fsm_array[0]);
 	}
@@ -384,7 +386,7 @@ void free_space(bool global_history, bool global_table) {
 			free((&btb_array[i])->history);
 	}
 	free(btb_array);
-	
+
 	free(BTB);
 
 	return;
