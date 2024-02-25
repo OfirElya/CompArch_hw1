@@ -86,7 +86,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 		BTB->btb_blocks[i].valid = false;
 		BTB->btb_blocks[i].branch_pc = 0;
 		BTB->btb_blocks[i].target_pc = 0;
-		BTB->btb_blocks[i].tag = 0;
+		BTB->btb_blocks[i].tag = -1;
 	}
 
 	// initialize histories
@@ -368,7 +368,7 @@ FSM_state update_state(FSM_state current_state, bool taken) {
 uint32_t calc_tag(uint32_t pc) {
 	uint32_t tmp = pc >> 2;
 	int tag_size = BTB->tag_size;
-	int tag_start = log(BTB->btb_size);
+	int tag_start = log2(BTB->btb_size);
 	return (((tmp >> tag_start) << (PC_SIZE - tag_size)) >> (PC_SIZE - tag_size));
 }
 
