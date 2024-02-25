@@ -212,24 +212,18 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		block->branch_pc = pc;
 		block->target_pc = targetPc;
 		block->valid = true;
+        int location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 
 		// update FSM state
 		// local tables
 		if (!BTB->global_table) {
-			BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
-			current_state = BTB->initial_state;
+			BTB->fsm_array[entry][*(block->history)] = update_state(BTB->initial_state, taken);
 		}
 		// global table
 		else
 			BTB->fsm_array[entry][location] = update_state(current_state, taken);
 
-		// update history
-		// local histories
-		if (!BTB->global_history)
-			*block->history = 0;
-		// global history
-		else
-			update_history(block->history, taken, history_mask);
+        update_history(block->history, taken, history_mask);
 	}
 	// A block exists in wanted entry
 	else {
@@ -245,20 +239,20 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		}
 		// block not in BTB - need to replace entry
 		else {
+            uint32_t tmp = pc;
 			block->branch_pc = pc;
 			block->target_pc = targetPc;
 			block->tag = tag;
-			block->valid = true;
-
 			// update FSM state
 			// local tables
 			if (!BTB->global_table) {
-				BTB->fsm_array[entry][*(block->history)] = BTB->initial_state;
-				current_state = BTB->initial_state;
+                for(int i =0;i < (int)pow(2,BTB->history_size);i++)
+                    BTB->fsm_array[entry][i] = BTB->initial_state;
+                BTB->fsm_array[entry][0] = update_state(BTB->initial_state, taken);
 			}
 			// global table
 			else {
-				location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+//				location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
 				current_state = WNT;
 			}
@@ -267,10 +261,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			// local histories
 			if (!BTB->global_history)
 				*block->history = 0;
-			// global history
-			else {
-				update_history(block->history, taken, history_mask);
-			}
+            update_history(block->history, taken, history_mask);
 		}
 	}
 
