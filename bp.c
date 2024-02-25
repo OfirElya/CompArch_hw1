@@ -54,7 +54,7 @@ uint32_t calc_tag(uint32_t pc);
 int find_block(uint32_t pc);
 void update_history(uint32_t* history, bool taken, uint32_t mask);
 int calcSharedEntry(int shared, uint32_t history, uint32_t pc, uint32_t history_size);
-void is_flush(FSM_state current_state, bool taken);
+void is_flush(bool prediction, bool taken);
 void free_space(bool global_history, bool global_table);
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
@@ -204,6 +204,10 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	int location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 	// get current state of specified entry
 	FSM_state current_state = BTB->fsm_array[entry][location];
+	bool prediction = current_state >> 1;
+
+	uint32_t old_history = *block->history;
+	uint32_t new_state;
 
 	// if BTB entry is empty
 	if (!block->valid) {
@@ -212,16 +216,24 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		block->branch_pc = pc;
 		block->target_pc = targetPc;
 		block->valid = true;
-        int location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+
+		prediction = false; // for unfamiliar branch we predict NT
+
+        location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 
 		// update FSM state
 		// local tables
 		if (!BTB->global_table) {
 			BTB->fsm_array[entry][*(block->history)] = update_state(BTB->initial_state, taken);
+			new_state = BTB->fsm_array[entry][*(block->history)];
+			old_history = 0;
 		}
 		// global table
-		else
+		else {
 			BTB->fsm_array[entry][location] = update_state(current_state, taken);
+			new_state = BTB->fsm_array[entry][location];
+			old_history = 0;
+		}
 
         update_history(block->history, taken, history_mask);
 	}
@@ -231,30 +243,44 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		// if block is the wanted block
 		if (block->tag == tag) {
 
+			block->branch_pc = pc;
+			block->target_pc = targetPc;
+
 			// update FSM state
 			BTB->fsm_array[entry][location] = update_state(current_state, taken);
+			new_state = BTB->fsm_array[entry][location];
 
 			// update history
 			update_history(block->history, taken, history_mask);
 		}
 		// block not in BTB - need to replace entry
 		else {
-            uint32_t tmp = pc;
 			block->branch_pc = pc;
 			block->target_pc = targetPc;
 			block->tag = tag;
-            current_state = BTB->initial_state;
+            //current_state = BTB->initial_state;
+			prediction = false;
+			
 			// update FSM state
 			// local tables
 			if (!BTB->global_table) {
-                for(int i =0;i < (int)pow(2,BTB->history_size);i++)
+				// initialize new block fsm states
+                for(int i = 0; i < (int)pow(2,BTB->history_size); i++)
                     BTB->fsm_array[entry][i] = BTB->initial_state;
+				// update fsm according to initialized history 0
                 BTB->fsm_array[entry][0] = update_state(BTB->initial_state, taken);
+				new_state = BTB->fsm_array[entry][0];
+				old_history = 0;
 			}
 			// global table
 			else {
-//				location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+				if (!BTB->global_history)
+					*block->history = 0;
+				location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+				current_state = BTB->fsm_array[entry][location];
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
+				new_state = BTB->fsm_array[entry][location];
+				old_history = 0;
 			}
 
 			// update history
@@ -266,7 +292,9 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	}
 
 	// check for flushes
-	is_flush(current_state, taken);
+	is_flush(prediction, taken);
+	//printf("tag %d entry %d location %d taken %d prediction %d history %d --> %d state %d --> %d\n", tag, entry, location, taken, prediction, old_history, *block->history, current_state, new_state);
+	//printf("flushes %d\n\n", BTB->flushes);
 
 	return;
 }
@@ -380,8 +408,7 @@ int calcSharedEntry(int shared, uint32_t history, uint32_t pc, uint32_t history_
 }
 
 // count the number of flushes
-void is_flush(FSM_state current_state, bool taken) {
-	bool prediction = current_state >> 1;
+void is_flush(bool prediction, bool taken) {
 	if (prediction != taken)
 		BTB->flushes++;
 	return;
