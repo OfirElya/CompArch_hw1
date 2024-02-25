@@ -243,6 +243,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			block->branch_pc = pc;
 			block->target_pc = targetPc;
 			block->tag = tag;
+            current_state = BTB->initial_state;
 			// update FSM state
 			// local tables
 			if (!BTB->global_table) {
@@ -254,7 +255,6 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			else {
 //				location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
-				current_state = WNT;
 			}
 
 			// update history
