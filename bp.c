@@ -21,7 +21,6 @@ typedef enum {
 /* A structure to return information about the current BTB block */
 typedef struct {
 	uint32_t tag;
-	uint32_t branch_pc;
 	uint32_t target_pc;
 	uint32_t* history;
 	bool valid;
@@ -84,7 +83,6 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	// initialize btb blocks array
 	for (int i = 0; i < btbSize; i++) {
 		BTB->btb_blocks[i].valid = false;
-		BTB->btb_blocks[i].branch_pc = 0;
 		BTB->btb_blocks[i].target_pc = 0;
 		BTB->btb_blocks[i].tag = -1;
 	}
@@ -163,7 +161,7 @@ bool BP_predict(uint32_t pc, uint32_t* dst) {
 	// local tables
 	if (!BTB->global_table) { 
 		// if wanted tag is not in BTB, predict NT
-		if (tag != block->tag) 
+		if (tag != block->tag || !block->valid)
 			prediction = false;
 		// if tag exists in BTB, predict by state and history
 		else 
@@ -209,33 +207,23 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	bool prediction = current_state >> 1;
     bool wrongDst = false;
 
-	uint32_t old_history = *block->history;
-	uint32_t new_state;
-
 	// if BTB entry is empty
 	if (!block->valid) {
 		BTB->blocks_in_btb++;
 		block->tag = tag;
-		block->branch_pc = pc;
 		block->target_pc = targetPc;
 		block->valid = true;
 
 		prediction = false; // for unfamiliar branch we predict NT
 
-        location = calcSharedEntry(BTB->shared, *(block->history), pc, BTB->history_size);
-
 		// update FSM state
 		// local tables
 		if (!BTB->global_table) {
-			BTB->fsm_array[entry][*(block->history)] = update_state(BTB->initial_state, taken);
-			new_state = BTB->fsm_array[entry][*(block->history)];
-			old_history = 0;
+			BTB->fsm_array[entry][*(block->history)] = update_state(BTB->initial_state, taken);;
 		}
 		// global table
 		else {
 			BTB->fsm_array[entry][location] = update_state(current_state, taken);
-			new_state = BTB->fsm_array[entry][location];
-			old_history = 0;
 		}
 
         update_history(block->history, taken, history_mask);
@@ -246,62 +234,51 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		// if block is the wanted block
 		if (block->tag == tag ) {
 
-			block->branch_pc = pc;
             if(targetPc != block->target_pc)
                 wrongDst = true;
 			block->target_pc = targetPc;
 
 			// update FSM state
 			BTB->fsm_array[entry][location] = update_state(current_state, taken);
-			new_state = BTB->fsm_array[entry][location];
 
 			// update history
 			update_history(block->history, taken, history_mask);
 		}
 		// block not in BTB - need to replace entry
 		else {
-			block->branch_pc = pc;
 			block->target_pc = targetPc;
 			block->tag = tag;
-            //current_state = BTB->initial_state;
+
 			prediction = false;
+
+			if (!BTB->global_history)
+				*block->history = 0;
+
 			// update FSM state
 			// local tables
 			if (!BTB->global_table) {
 				// initialize new block fsm states
                 for(int i = 0; i < (int)pow(2,BTB->history_size); i++)
                     BTB->fsm_array[entry][i] = BTB->initial_state;
-				// update fsm according to initialized history 0
+				// update fsm according to history
                 if(BTB->global_history)
                     BTB->fsm_array[entry][(*block->history)] = update_state(BTB->initial_state, taken);
                 else
                     BTB->fsm_array[entry][0] = update_state(BTB->initial_state, taken);
-				new_state = BTB->fsm_array[entry][0];
-				old_history = 0;
 			}
 			// global table
 			else {
-				if (!BTB->global_history)
-					*block->history = 0;
 				location = calcSharedEntry(BTB->shared, *(block->history), pc, BTB->history_size);
 				current_state = BTB->fsm_array[entry][location];
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
-				new_state = BTB->fsm_array[entry][location];
-				old_history = 0;
 			}
 
-			// update history
-			// local histories
-			if (!BTB->global_history)
-				*block->history = 0;
             update_history(block->history, taken, history_mask);
 		}
 	}
 
 	// check for flushes
 	is_flush(prediction, taken, wrongDst);
-	//printf("tag %d entry %d location %d taken %d prediction %d history %d --> %d state %d --> %d\n", tag, entry, location, taken, prediction, old_history, *block->history, current_state, new_state);
-	//printf("flushes %d\n\n", BTB->flushes);
 
 	return;
 }
@@ -373,10 +350,11 @@ FSM_state update_state(FSM_state current_state, bool taken) {
 
 // calculate the tag from the pc according to btb size and tag size
 uint32_t calc_tag(uint32_t pc) {
+	if (BTB->tag_size == 0)
+		return -1;
+
 	uint32_t tmp = pc >> 2;
     tmp = tmp >> (int)log2(BTB->btb_size);
-    if(BTB->tag_size == 0)
-        return -1;
     return (tmp % (int)pow(2, BTB->tag_size));
 }
 
@@ -417,7 +395,7 @@ int calcSharedEntry(int shared, uint32_t history, uint32_t pc, uint32_t history_
 
 // count the number of flushes
 void is_flush(bool prediction, bool taken, bool wrongDst) {
-	if (prediction != taken || wrongDst)
+	if (prediction != taken || (wrongDst && prediction))
 		BTB->flushes++;
 	return;
 }
