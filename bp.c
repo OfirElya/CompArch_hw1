@@ -54,7 +54,7 @@ uint32_t calc_tag(uint32_t pc);
 int find_block(uint32_t pc);
 void update_history(uint32_t* history, bool taken, uint32_t mask);
 int calcSharedEntry(int shared, uint32_t history, uint32_t pc, uint32_t history_size);
-void is_flush(bool prediction, bool taken);
+void is_flush(bool prediction, bool taken, bool wrongDst);
 void free_space(bool global_history, bool global_table);
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
@@ -207,6 +207,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	// get current state of specified entry
 	FSM_state current_state = BTB->fsm_array[entry][location];
 	bool prediction = current_state >> 1;
+    bool wrongDst = false;
 
 	uint32_t old_history = *block->history;
 	uint32_t new_state;
@@ -246,6 +247,8 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 		if (block->tag == tag ) {
 
 			block->branch_pc = pc;
+            if(targetPc != block->target_pc)
+                wrongDst = true;
 			block->target_pc = targetPc;
 
 			// update FSM state
@@ -296,7 +299,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	}
 
 	// check for flushes
-	is_flush(prediction, taken);
+	is_flush(prediction, taken, wrongDst);
 	//printf("tag %d entry %d location %d taken %d prediction %d history %d --> %d state %d --> %d\n", tag, entry, location, taken, prediction, old_history, *block->history, current_state, new_state);
 	//printf("flushes %d\n\n", BTB->flushes);
 
@@ -413,8 +416,8 @@ int calcSharedEntry(int shared, uint32_t history, uint32_t pc, uint32_t history_
 }
 
 // count the number of flushes
-void is_flush(bool prediction, bool taken) {
-	if (prediction != taken)
+void is_flush(bool prediction, bool taken, bool wrongDst) {
+	if (prediction != taken || wrongDst)
 		BTB->flushes++;
 	return;
 }
