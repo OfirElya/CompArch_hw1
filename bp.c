@@ -172,7 +172,7 @@ bool BP_predict(uint32_t pc, uint32_t* dst) {
 	// global table
 	else { 
 		// if wanted tag is not in BTB, predict NT
-		if (tag != block->tag) 
+		if (tag != block->tag || !block->valid)
 			prediction = false;
 		// tag exists in BTB, predict by state and history
 		else { 
@@ -201,7 +201,9 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 
 	BTB_block* block = &(BTB->btb_blocks[entry]);
 	// calc location in fsm array
-	int location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+	int location = calcSharedEntry(BTB->shared, *(block->history), pc, BTB->history_size);
+    if(!BTB->global_table)
+        location = *(block->history);
 	// get current state of specified entry
 	FSM_state current_state = BTB->fsm_array[entry][location];
 	bool prediction = current_state >> 1;
@@ -219,7 +221,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 
 		prediction = false; // for unfamiliar branch we predict NT
 
-        location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+        location = calcSharedEntry(BTB->shared, *(block->history), pc, BTB->history_size);
 
 		// update FSM state
 		// local tables
@@ -241,7 +243,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 	else {
 
 		// if block is the wanted block
-		if (block->tag == tag) {
+		if (block->tag == tag ) {
 
 			block->branch_pc = pc;
 			block->target_pc = targetPc;
@@ -260,7 +262,6 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			block->tag = tag;
             //current_state = BTB->initial_state;
 			prediction = false;
-			
 			// update FSM state
 			// local tables
 			if (!BTB->global_table) {
@@ -268,7 +269,10 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
                 for(int i = 0; i < (int)pow(2,BTB->history_size); i++)
                     BTB->fsm_array[entry][i] = BTB->initial_state;
 				// update fsm according to initialized history 0
-                BTB->fsm_array[entry][0] = update_state(BTB->initial_state, taken);
+                if(BTB->global_history)
+                    BTB->fsm_array[entry][(*block->history)] = update_state(BTB->initial_state, taken);
+                else
+                    BTB->fsm_array[entry][0] = update_state(BTB->initial_state, taken);
 				new_state = BTB->fsm_array[entry][0];
 				old_history = 0;
 			}
@@ -276,7 +280,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 			else {
 				if (!BTB->global_history)
 					*block->history = 0;
-				location = calcSharedEntry(BTB->shared, *(block->history), block->branch_pc, BTB->history_size);
+				location = calcSharedEntry(BTB->shared, *(block->history), pc, BTB->history_size);
 				current_state = BTB->fsm_array[entry][location];
 				BTB->fsm_array[entry][location] = update_state(current_state, taken);
 				new_state = BTB->fsm_array[entry][location];
@@ -367,9 +371,10 @@ FSM_state update_state(FSM_state current_state, bool taken) {
 // calculate the tag from the pc according to btb size and tag size
 uint32_t calc_tag(uint32_t pc) {
 	uint32_t tmp = pc >> 2;
-	int tag_size = BTB->tag_size;
-	int tag_start = log2(BTB->btb_size);
-	return (((tmp >> tag_start) << (PC_SIZE - tag_size)) >> (PC_SIZE - tag_size));
+    tmp = tmp >> (int)log2(BTB->btb_size);
+    if(BTB->tag_size == 0)
+        return -1;
+    return (tmp % (int)pow(2, BTB->tag_size));
 }
 
 // calculate the entry in btb array according to btb size bits in pc
